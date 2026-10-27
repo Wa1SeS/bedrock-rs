@@ -96,7 +96,7 @@ impl Serialize for AuthData {
                     .map_err(serde::ser::Error::custom)?,
                 String::new(),
             ),
-            AuthPayload::Token(token) => (Certificate::default(), token.clone()),
+            AuthPayload::Token(token) => (String::new(), token.clone()),
         };
         RawAuthData {
             auth_type: self.auth_type,
