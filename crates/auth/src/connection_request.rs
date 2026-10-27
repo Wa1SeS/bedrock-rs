@@ -74,7 +74,9 @@ impl ConnectionRequest {
         display_name: &str,
         client_data: &ClientData,
     ) -> Result<Self, AuthError> {
-        let auth = offline_auth(identity_key, "", display_name, None, None)?;
+        let leguuid = (!client_data.self_signed_id.is_empty())
+            .then(|| client_data.self_signed_id.clone());
+        let auth = offline_auth(identity_key, "", display_name, leguuid, None, client_data.device_os)?;
         Self::with_auth(auth, identity_key, client_data)
     }
 
@@ -82,13 +84,9 @@ impl ConnectionRequest {
         let identity = self.auth.unverified_identity()?;
         let client_data: serde_json::Value =
             Token::parse(&self.client_data)?.unverified_claims()?;
-        let auth = offline_auth(
-            identity_key,
-            &identity.xuid,
-            &identity.display_name,
-            identity.identity,
-            identity.title_id,
-        )?;
+        let device_os = client_data["DeviceOS"].as_i64().unwrap_or(0) as i32;
+        let auth = offline_auth(identity_key, &identity.xuid, &identity.display_name,
+                                identity.identity, identity.title_id, device_os)?;
         Ok(Self {
             auth,
             client_data: encode_es384_with_x5u(identity_key, &client_data)?,
@@ -133,31 +131,29 @@ fn offline_auth(
     identity_key: &SecretKey,
     xuid: &str,
     display_name: &str,
-    identity: Option<String>,
+    leguuid: Option<String>,
     title_id: Option<String>,
+    device_os: i32,
 ) -> Result<AuthData, AuthError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
-    let mut extra_data = json!({
-        "XUID": xuid,
-        "displayName": display_name,
-        "identity": identity.unwrap_or_else(|| Uuid::new_v4().to_string()),
-    });
-    if let Some(title_id) = title_id {
-        extra_data["titleId"] = json!(title_id);
-    }
-    let claims = json!({
-        "certificateAuthority": true,
-        "identityPublicKey": encode_public_key(&identity_key.public_key())?,
-        "iat": now,
-        "nbf": now.saturating_sub(SELF_SIGNED_NOT_BEFORE_SKEW_SECS),
+        .map_or(0, |e| e.as_secs());
+    let mut claims = json!({
+        "ap": device_os,
+        "aud": AuthOIDC::AUDIENCE,
+        "cpk": encode_public_key(&identity_key.public_key())?,
         "exp": now + SELF_SIGNED_LIFETIME_SECS,
-        "extraData": extra_data,
+        "leguuid": leguuid.unwrap_or_else(|| Uuid::new_v4().to_string()),
+        "mid": "", "nid": "", "nname": "", "pid": "", "pname": "",
+        "xid": xuid,
+        "xname": display_name,
     });
+    if let Some(tid) = title_id {
+        claims["tid"] = json!(tid);
+    }
     Ok(AuthData {
         auth_type: AuthType::Offline,
-        auth_payload: AuthPayload::Chain(vec![encode_es384_with_x5u(identity_key, &claims)?]),
+        auth_payload: AuthPayload::Token(encode_es384_with_x5u(identity_key, &claims)?),
     })
 }
 
