@@ -28,7 +28,7 @@ pub enum AuthPayload {
 struct RawAuthData {
     #[serde(rename = "AuthenticationType", default = "legacy_auth_type")]
     auth_type: AuthType,
-    #[serde(rename = "Certificate", default)]
+    #[serde(rename = "Certificate", default, skip_serializing_if = "String::is_empty")]
     certificate: String,
     #[serde(rename = "Token", default)]
     token: String,
@@ -92,16 +92,15 @@ impl Serialize for AuthData {
     {
         let (certificate, token) = match &self.auth_payload {
             AuthPayload::Chain(chain) => (
-                Certificate {
-                    chain: chain.clone(),
-                },
+                serde_json::to_string(&Certificate { chain: chain.clone() })
+                    .map_err(serde::ser::Error::custom)?,
                 String::new(),
             ),
             AuthPayload::Token(token) => (Certificate::default(), token.clone()),
         };
         RawAuthData {
             auth_type: self.auth_type,
-            certificate: serde_json::to_string(&certificate).map_err(serde::ser::Error::custom)?,
+            certificate,
             token,
             chain: Vec::new(),
         }
